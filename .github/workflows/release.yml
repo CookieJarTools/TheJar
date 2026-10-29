@@ -1,9 +1,10 @@
 name: Release
 
 # To publish a new version, open Actions › Release › Run workflow and pick which part of the
-# version goes up. The workflow tests main, sets the version in Cargo.toml, commits and tags
-# it, builds TheJar-Setup-x.y.z.exe and TheJar-x.y.z.AppImage, and publishes the release.
-# Every copy of The Jar offers the update on its next check.
+# version goes up. The workflow tests main, builds TheJar-Setup-x.y.z.exe and
+# TheJar-x.y.z.AppImage with the new version, and only once everything has built does it
+# commit the version to main, tag it and publish the release. If anything fails, nothing is
+# pushed. Every copy of The Jar offers the update on its next check.
 #
 # Pull requests and pushes to main are tested and built the same way, without releasing.
 # Pushing a tag like v0.2.0 by hand still works too: that tag is built and its files are
@@ -33,10 +34,6 @@ concurrency:
   group: release-${{ github.event_name == 'workflow_dispatch' && 'publish' || github.ref }}
   cancel-in-progress: false
 
-env:
-  # Set on a tag push. On Run workflow it comes from the tag job instead.
-  PUSHED_TAG: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
-
 jobs:
   test:
     name: Test on ${{ matrix.os }}
@@ -54,52 +51,58 @@ jobs:
       - run: cargo clippy --all-targets --locked -- -D warnings
       - run: cargo test --locked
 
-  tag:
-    name: Bump the version and tag it
-    if: github.event_name == 'workflow_dispatch'
+  version:
+    name: Work out the version
     needs: test
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     outputs:
-      tag: ${{ steps.bump.outputs.tag }}
-      sha: ${{ steps.bump.outputs.sha }}
+      tag: ${{ steps.version.outputs.tag }}
+      publish: ${{ steps.version.outputs.publish }}
     steps:
       - name: Only from main
-        if: github.ref != 'refs/heads/main'
+        if: github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/main'
         run: |
           echo "::error::Releases are made from main. This run was started on $GITHUB_REF_NAME."
           exit 1
 
       - uses: actions/checkout@v7
 
-      - name: Bump, commit and tag
-        id: bump
+      - name: Bump it, or read it
+        id: version
         env:
           BUMP: ${{ inputs.bump }}
         run: |
-          version=$(python3 scripts/bump-version.py "$BUMP")
-          tag="v$version"
-          if git ls-remote --exit-code --tags origin "refs/tags/$tag" > /dev/null; then
-            echo "::error::$tag already exists. Pick patch, minor or major to make a new version."
-            exit 1
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
+            version=$(python3 scripts/bump-version.py "$BUMP")
+            if git ls-remote --exit-code --tags origin "refs/tags/v$version" > /dev/null; then
+              echo "::error::v$version already exists. Pick patch, minor or major to make a new version."
+              exit 1
+            fi
+            echo "tag=v$version" >> "$GITHUB_OUTPUT"
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          elif [ "$GITHUB_REF_TYPE" = tag ]; then
+            version=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
+            if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+              echo "::error::Cargo.toml says $version, so the files would not be named for $GITHUB_REF_NAME."
+              exit 1
+            fi
+            echo "tag=$GITHUB_REF_NAME" >> "$GITHUB_OUTPUT"
+            echo "publish=true" >> "$GITHUB_OUTPUT"
           fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898283+github-actions[bot]@users.noreply.github.com"
-          if ! git diff --quiet; then
-            git commit -am "Release $version"
-          fi
-          git tag "$tag"
-          # Both or neither: a tag without its version commit on main would be confusing.
-          git push --atomic origin HEAD:main "$tag"
-          echo "tag=$tag" >> "$GITHUB_OUTPUT"
-          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "Version: $(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)"
+
+      # The later jobs build from these, so they all agree on the new version.
+      - uses: actions/upload-artifact@v7
+        with:
+          name: version
+          path: |
+            Cargo.toml
+            Cargo.lock
+          retention-days: 7
 
   build:
     name: Build on ${{ matrix.os }}
-    needs: [test, tag]
-    # The tag job only runs on Run workflow; being skipped is fine, failing is not.
-    if: ${{ !cancelled() && !failure() }}
+    needs: version
     strategy:
       matrix:
         include:
@@ -109,27 +112,19 @@ jobs:
           - os: ubuntu-22.04
             artifact: linux
     runs-on: ${{ matrix.os }}
-    env:
-      RELEASE_TAG: ${{ needs.tag.outputs.tag }}
     defaults:
       run:
         shell: bash
     steps:
       - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
         with:
-          ref: ${{ needs.tag.outputs.sha || github.sha }}
+          name: version
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
 
-      - name: Check the tag matches Cargo.toml
-        run: |
-          version=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
-          echo "VERSION=$version" >> "$GITHUB_ENV"
-          tag=${RELEASE_TAG:-$PUSHED_TAG}
-          if [ -n "$tag" ] && [ "v$version" != "$tag" ]; then
-            echo "::error::Cargo.toml says $version, so the files would not be named for $tag."
-            exit 1
-          fi
+      - name: Read the version
+        run: echo "VERSION=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)" >> "$GITHUB_ENV"
 
       - run: cargo build --release --locked
 
@@ -154,13 +149,13 @@ jobs:
 
   installer:
     name: Build the Windows installer
-    needs: [tag, build]
-    if: ${{ !cancelled() && !failure() }}
+    needs: build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
         with:
-          ref: ${{ needs.tag.outputs.sha || github.sha }}
+          name: version
       - uses: actions/download-artifact@v8
         with:
           name: windows
@@ -186,37 +181,58 @@ jobs:
 
   release:
     name: Publish the release
-    needs: [tag, build, installer]
-    if: ${{ !cancelled() && !failure() && (needs.tag.outputs.tag != '' || github.ref_type == 'tag') }}
+    needs: [version, build, installer]
+    if: needs.version.outputs.publish == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: write
     env:
-      RELEASE_TAG: ${{ needs.tag.outputs.tag }}
+      TAG: ${{ needs.version.outputs.tag }}
       PRERELEASE: ${{ github.event_name != 'workflow_dispatch' || inputs.prerelease }}
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
     steps:
+      - uses: actions/checkout@v7
+        if: github.event_name == 'workflow_dispatch'
+      - uses: actions/download-artifact@v8
+        if: github.event_name == 'workflow_dispatch'
+        with:
+          name: version
+
+      - name: Commit the version and tag it
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898283+github-actions[bot]@users.noreply.github.com"
+          if ! git diff --quiet; then
+            git commit -am "Release ${TAG#v}"
+          fi
+          git tag "$TAG"
+          # Both or neither. If main has moved on since this run started, this fails and
+          # nothing is published; run it again.
+          git push --atomic origin HEAD:main "$TAG"
+
       - uses: actions/download-artifact@v8
         with:
+          name: linux
           path: files
-          merge-multiple: true
+      - uses: actions/download-artifact@v8
+        with:
+          name: installer
+          path: files
+
       - name: Publish
         working-directory: files
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
         run: |
-          tag=${RELEASE_TAG:-$PUSHED_TAG}
-          # The bare exe ships inside the installer; only the installer is published.
-          rm -f thejar.exe
           sha256sum *
-          if gh release view "$tag" > /dev/null 2>&1; then
-            gh release upload "$tag" * --clobber
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            gh release upload "$TAG" * --clobber
             exit 0
           fi
           # Made as a draft with its files, then published, so The Jar never sees it half-uploaded.
-          flags=(--draft --verify-tag --generate-notes --title "The Jar ${tag#v}")
+          flags=(--draft --verify-tag --generate-notes --title "The Jar ${TAG#v}")
           if [ "$PRERELEASE" = true ]; then
             flags+=(--prerelease)
           fi
-          gh release create "$tag" * "${flags[@]}"
-          gh release edit "$tag" --draft=false
+          gh release create "$TAG" * "${flags[@]}"
+          gh release edit "$TAG" --draft=false

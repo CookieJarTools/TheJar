@@ -107,7 +107,7 @@ On GitHub, open **Actions › Release › Run workflow**, pick which part of the
 - **patch** for fixes (0.1.0 → 0.1.1), **minor** for new features (0.1.1 → 0.2.0), **major** for big changes (0.2.0 → 1.0.0)
 - **current** releases the version already in `Cargo.toml`, for the first release or after you've set it by hand
 
-The [release workflow](.github/workflows/release.yml) tests on Windows and Linux, commits the new version to `main`, tags it, builds `TheJar-Setup-x.y.z.exe` and `TheJar-x.y.z.AppImage`, and publishes the release with notes generated from the commits since the last one. Leave **Mark it as a pre-release** ticked to match the other CookieJarTools apps. Every copy of The Jar offers the update on its next check.
+The [release workflow](.github/workflows/release.yml) tests on Windows and Linux and builds `TheJar-Setup-x.y.z.exe` and `TheJar-x.y.z.AppImage` with the new version. Once everything has built, it commits the version to `main`, tags it, and publishes the release with notes generated from the commits since the last one. If any step fails, nothing is pushed. Leave **Mark it as a pre-release** ticked to match the other CookieJarTools apps. Every copy of The Jar offers the update on its next check.
 
 From a terminal, `gh workflow run release.yml -f bump=patch` does the same. Run `git pull` afterwards, since the workflow commits the version change to `main`.
 
