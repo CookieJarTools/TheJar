@@ -204,9 +204,13 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898283+github-actions[bot]@users.noreply.github.com"
-          if ! git diff --quiet; then
-            git commit -am "Release ${TAG#v}"
+          if git diff --quiet; then
+            # "current": the version was already on main, so only the tag is new.
+            git tag "$TAG"
+            git push origin "$TAG"
+            exit 0
           fi
+          git commit -am "Release ${TAG#v}"
           git tag "$TAG"
           # Both or neither. If main has moved on since this run started, this fails and
           # nothing is published; run it again.
