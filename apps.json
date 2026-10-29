@@ -25,6 +25,18 @@
         "desktop_name": "gamebridge",
         "categories": "Development;Game;"
       }
+    },
+    {
+      "id": "postie",
+      "name": "Postie",
+      "tagline": "A mail client that waits in the tray and tells you when mail arrives.",
+      "repo": "CookieJarTools/Postie",
+      "icon": "https://raw.githubusercontent.com/CookieJarTools/Postie/HEAD/assets/icon.png",
+      "linux": {
+        "desktop_name": "postie",
+        "categories": "Network;Email;Office;",
+        "protocols": ["mailto"]
+      }
     }
   ]
 }

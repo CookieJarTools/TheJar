@@ -1,6 +1,6 @@
 # The Jar
 
-The Jar installs the CookieJarTools desktop apps on Windows and Linux and keeps them up to date. Right now that's [CrumbTree](https://github.com/CookieJarTools/CrumbTree) and [GameBridge](https://github.com/CookieJarTools/GameBridge), and new apps appear in it on their own as they're released.
+The Jar installs the CookieJarTools desktop apps on Windows and Linux and keeps them up to date. Right now that's [CrumbTree](https://github.com/CookieJarTools/CrumbTree), [GameBridge](https://github.com/CookieJarTools/GameBridge) and [Postie](https://github.com/CookieJarTools/Postie) (Linux only), and new apps appear in it on their own as they're released.
 
 It's small and opens straight away.
 
