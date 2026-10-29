@@ -56,4 +56,4 @@ thejar self-update          # update The Jar itself
 
 ## Licence
 
-The Jar is under the [PolyForm Shield License 1.0.0](LICENSE.md). It bundles the [Inter](https://rsms.me/inter/) typeface, which is under the [SIL Open Font License](assets/fonts/OFL.txt).
+The Jar is under the [PolyForm Shield License 1.0.0](LICENSE.md). It bundles the [Inter](https://rsms.me/inter/) and [Fredoka](https://github.com/hafontia/Fredoka-One) typefaces, both under the SIL Open Font License ([Inter](assets/fonts/Inter-OFL.txt), [Fredoka](assets/fonts/Fredoka-OFL.txt)).

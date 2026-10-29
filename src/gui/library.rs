@@ -1,138 +1,172 @@
-use egui::{Align, CornerRadius, Layout, Rect, ScrollArea, Sense, Stroke, Ui, UiBuilder, pos2, vec2};
+use egui::{
+    Align, Color32, CornerRadius, Layout, Rect, ScrollArea, Sense, Shadow, Stroke, StrokeKind, Ui, UiBuilder, pos2,
+    vec2,
+};
 
 use super::entry::{Entry, Status};
 use super::theme::{self, *};
-use super::widgets::{self, Kind};
+use super::widgets::{self, Kind, Tone};
 use super::{Action, JarApp};
 use crate::catalog::Source;
 use crate::ops::Phase;
 
-const ROW_HEIGHT: f32 = 64.0;
+const HERO_FILL: Color32 = Color32::from_rgb(0x2b, 0x1f, 0x16);
+const CARD_HEIGHT: f32 = 156.0;
+const CARD_MIN_WIDTH: f32 = 290.0;
+const GAP: f32 = 16.0;
 
 pub fn show(app: &JarApp, ui: &mut Ui, out: &mut Vec<Action>) {
-    header(app, ui, out);
-    ui.add_space(18.0);
+    // A big faint cookie in the corner, behind everything else.
+    let panel = ui.clip_rect();
+    widgets::paint_cookie(ui.painter(), panel.right_bottom() - vec2(40.0, 30.0), 120.0, 0.045, Some(BG));
+
+    hero(app, ui, out);
+    source_note(app, ui);
+    ui.add_space(24.0);
 
     if app.entries.is_empty() {
-        widgets::note(ui, "There are no apps in the list yet.");
+        empty(ui);
         return;
     }
-    ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-        egui::Frame::new().fill(BG_SOFT).stroke(Stroke::new(1.0, LINE)).corner_radius(8).inner_margin(4).show(
-            ui,
-            |ui| {
-                ui.spacing_mut().item_spacing.y = 0.0;
-                for (i, entry) in app.entries.iter().enumerate() {
-                    if i > 0 {
-                        divider(ui);
-                    }
-                    row(app, entry, ui, out);
-                }
-            },
-        );
+    widgets::label(ui, "In the jar", theme::display(16.0), FG_MUTED);
+    ui.add_space(10.0);
+    ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| grid(app, ui, out));
+}
+
+fn hero(app: &JarApp, ui: &mut Ui, out: &mut Vec<Action>) {
+    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 132.0), Sense::hover());
+    let painter = ui.painter();
+    painter.rect(rect, CornerRadius::same(18), HERO_FILL, Stroke::new(1.0, LINE), StrokeKind::Inside);
+
+    let cookies = rect.width() > 520.0;
+    if cookies {
+        let big = pos2(rect.right() - 86.0, rect.center().y + 8.0);
+        widgets::paint_cookie(painter, pos2(rect.right() - 162.0, rect.center().y - 20.0), 28.0, 0.85, None);
+        widgets::paint_cookie(painter, big, 50.0, 1.0, Some(HERO_FILL));
+        widgets::paint_crumbs(painter, big + vec2(-40.0, 26.0), 22.0, 0.8);
+    }
+
+    let room_for_cookies = if cookies { 230.0 } else { 26.0 };
+    let content = Rect::from_min_max(rect.min + vec2(26.0, 22.0), rect.max - vec2(room_for_cookies, 18.0));
+    let mut ui = ui.new_child(UiBuilder::new().max_rect(content).layout(Layout::top_down(Align::Min)));
+    ui.spacing_mut().item_spacing.y = 2.0;
+    widgets::label(&mut ui, "Your jar", theme::display(28.0), FG);
+    widgets::label(&mut ui, summary(app), theme::regular(13.0), FG_MUTED);
+    ui.add_space(12.0);
+    ui.horizontal(|ui| {
+        let updates = app.update_count();
+        if updates > 1 && widgets::button(ui, &format!("Update all ({updates})"), Kind::Primary).clicked() {
+            out.push(Action::UpdateAll);
+        }
+        let label = if app.checking { "Checking the oven…" } else { "Check for updates" };
+        let check = ui.add_enabled_ui(!app.checking, |ui| widgets::button(ui, label, Kind::Secondary)).inner;
+        if check.on_hover_text("F5").clicked() {
+            out.push(Action::Check);
+        }
     });
 }
 
-fn header(app: &JarApp, ui: &mut Ui, out: &mut Vec<Action>) {
-    ui.allocate_ui_with_layout(vec2(ui.available_width(), 30.0), Layout::left_to_right(Align::Center), |ui| {
-        widgets::label(ui, "Library", theme::semibold(21.0), FG);
-        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            let updates = app.update_count();
-            if updates > 1 && widgets::button(ui, &format!("Update all ({updates})"), Kind::Primary).clicked() {
-                out.push(Action::UpdateAll);
-            }
-            let label = if app.checking { "Checking…" } else { "Check for updates" };
-            let check = ui.add_enabled_ui(!app.checking, |ui| widgets::button(ui, label, Kind::Secondary)).inner;
-            if check.on_hover_text("F5").clicked() {
-                out.push(Action::Check);
-            }
-        });
-    });
-
+fn summary(app: &JarApp) -> String {
     let mut parts = vec![match app.entries.len() {
-        1 => "1 app".to_owned(),
-        n => format!("{n} apps"),
+        1 => "1 app in the jar".to_owned(),
+        n => format!("{n} apps in the jar"),
     }];
     match app.update_count() {
+        0 if app.last_check.is_some() => parts.push("all fresh".to_owned()),
         0 => {}
-        1 => parts.push("1 update".to_owned()),
-        n => parts.push(format!("{n} updates")),
+        1 => parts.push("1 new batch waiting".to_owned()),
+        n => parts.push(format!("{n} new batches waiting")),
     }
     if let Some(at) = app.last_check {
         parts.push(format!("checked {}", ago(at.elapsed().as_secs())));
     }
-    widgets::label(ui, parts.join(" · "), theme::regular(12.5), FG_MUTED);
+    parts.join(" · ")
+}
 
-    let source_note = match &app.source {
-        Source::Bundled(reason) if !reason.is_empty() => {
-            Some(format!("Showing the app list built into The Jar. {reason}"))
-        }
-        Source::Saved(reason) if !reason.is_empty() => {
-            Some(format!("Showing the app list from the last check. {reason}"))
-        }
-        _ => None,
+fn source_note(app: &JarApp, ui: &mut Ui) {
+    let text = match &app.source {
+        Source::Bundled(reason) if !reason.is_empty() => format!("Showing the app list built into The Jar. {reason}"),
+        Source::Saved(reason) if !reason.is_empty() => format!("Showing the app list from the last check. {reason}"),
+        _ => return,
     };
-    if let Some(text) = source_note {
-        ui.add_space(2.0);
-        widgets::label(ui, text, theme::regular(12.0), FG_SUBTLE);
+    ui.add_space(8.0);
+    widgets::label(ui, text, theme::regular(12.0), FG_SUBTLE);
+}
+
+fn grid(app: &JarApp, ui: &mut Ui, out: &mut Vec<Action>) {
+    let width = ui.available_width();
+    let columns = (((width + GAP) / (CARD_MIN_WIDTH + GAP)).floor() as usize).clamp(1, 3);
+    let card_width = (width - GAP * (columns - 1) as f32) / columns as f32;
+    // Room for the hover lift and shadow at the top.
+    ui.add_space(4.0);
+    for row in app.entries.chunks(columns) {
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = GAP;
+            for entry in row {
+                card(app, entry, ui, out, card_width);
+            }
+        });
+        ui.add_space(GAP);
     }
 }
 
-fn row(app: &JarApp, entry: &Entry, ui: &mut Ui, out: &mut Vec<Action>) {
-    let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), ROW_HEIGHT), Sense::click());
+fn card(app: &JarApp, entry: &Entry, ui: &mut Ui, out: &mut Vec<Action>, width: f32) {
+    let (rect, response) = ui.allocate_exact_size(vec2(width, CARD_HEIGHT), Sense::click());
     let selected = app.selected.as_deref() == Some(entry.spec.id.as_str());
     let hovered = ui.rect_contains_pointer(rect);
-    if selected || hovered {
-        let fill = if selected { BG_ACTIVE } else { BG_HOVER };
-        ui.painter().rect_filled(rect, CornerRadius::same(6), fill);
-    }
+    let lift = ui.ctx().animate_bool(response.id.with("lift"), hovered);
+    let card = rect.translate(vec2(0.0, -3.0 * lift));
     if response.clicked() {
-        let id = (!selected).then(|| entry.spec.id.clone());
-        out.push(Action::Select(id));
+        out.push(Action::Select((!selected).then(|| entry.spec.id.clone())));
     }
 
-    let icon = Rect::from_min_size(pos2(rect.left() + 12.0, rect.center().y - 18.0), vec2(36.0, 36.0));
+    let painter = ui.painter();
+    let shadow =
+        Shadow { offset: [0, 6], blur: 18, spread: 0, color: Color32::from_black_alpha(80 + (50.0 * lift) as u8) };
+    painter.add(shadow.as_shape(card, CornerRadius::same(16)));
+    let stroke = match (selected, hovered) {
+        (true, _) => Stroke::new(1.5, ACCENT),
+        (false, true) => Stroke::new(1.0, LINE_STRONG),
+        _ => Stroke::new(1.0, LINE),
+    };
+    let fill = if selected { BG_HOVER } else { BG_CARD };
+    painter.rect(card, CornerRadius::same(16), fill, stroke, StrokeKind::Inside);
+
+    let inner = card.shrink(18.0);
+    let icon = Rect::from_min_size(inner.min, vec2(52.0, 52.0));
     widgets::paint_app_icon(ui, icon, entry.icon_uri(), &entry.spec.name);
-
-    let actions_rect = rect.shrink2(vec2(14.0, 0.0));
-    let mut actions_ui =
-        ui.new_child(UiBuilder::new().max_rect(actions_rect).layout(Layout::right_to_left(Align::Center)));
-    row_actions(entry, &mut actions_ui, out);
-
     let text_left = icon.right() + 14.0;
-    let text_width = actions_ui.min_rect().left() - 20.0 - text_left;
-    let name = theme::medium(14.0);
-    widgets::paint_truncated(ui, pos2(text_left, rect.center().y - 18.0), &entry.spec.name, name, FG, text_width);
-    let tagline = theme::regular(12.5);
-    widgets::paint_truncated(
+    let text_width = inner.right() - text_left;
+    let name = widgets::paint_wrapped(
         ui,
-        pos2(text_left, rect.center().y + 2.0),
-        &entry.spec.tagline,
-        tagline,
-        FG_MUTED,
+        pos2(text_left, inner.top() + 1.0),
+        &entry.spec.name,
+        theme::display(19.0),
+        FG,
         text_width,
+        1,
     );
-}
+    let tagline_pos = pos2(text_left, name.bottom() + 3.0);
+    widgets::paint_wrapped(ui, tagline_pos, &entry.spec.tagline, theme::regular(12.5), FG_MUTED, text_width, 2);
 
-/// Laid out right to left, so the first thing added sits furthest right.
-fn row_actions(entry: &Entry, ui: &mut Ui, out: &mut Vec<Action>) {
-    let id = &entry.spec.id;
+    let bottom = Rect::from_min_max(pos2(inner.left(), inner.bottom() - 30.0), inner.max);
     if let Some(task) = &entry.task {
-        if task.phase == Phase::Downloading && widgets::small_button(ui, "Cancel", Kind::Ghost).clicked() {
-            out.push(Action::Cancel(id.clone()));
-        }
-        ui.allocate_ui_with_layout(vec2(150.0, 32.0), Layout::top_down(Align::Min), |ui| {
-            ui.spacing_mut().item_spacing.y = 6.0;
-            widgets::label(ui, task.text(), theme::regular(12.0), FG_MUTED);
-            widgets::progress(ui, task.fraction(), 150.0);
-        });
+        task_row(entry, task, ui, bottom, out);
         return;
     }
+    let mut buttons = ui.new_child(UiBuilder::new().max_rect(bottom).layout(Layout::right_to_left(Align::Center)));
+    card_buttons(entry, &mut buttons, out);
+    let status_area = Rect::from_min_max(bottom.min, pos2(buttons.min_rect().left() - 8.0, bottom.bottom()));
+    let mut status = ui.new_child(UiBuilder::new().max_rect(status_area).layout(Layout::left_to_right(Align::Center)));
+    card_status(entry, &mut status);
+}
 
-    let status = entry.status();
-    let primary = match status {
-        Status::Update => Some(("Update", Kind::Accent)),
-        Status::NotInstalled => Some(("Install", Kind::Secondary)),
+/// Laid out right to left, so the first button added sits furthest right.
+fn card_buttons(entry: &Entry, ui: &mut Ui, out: &mut Vec<Action>) {
+    let id = &entry.spec.id;
+    let primary = match entry.status() {
+        Status::Update => Some(("Update", Kind::Primary)),
+        Status::NotInstalled => Some(("Install", Kind::Accent)),
         _ => None,
     };
     if let Some((text, kind)) = primary
@@ -143,26 +177,46 @@ fn row_actions(entry: &Entry, ui: &mut Ui, out: &mut Vec<Action>) {
     if entry.installed.is_some() && widgets::button(ui, "Open", Kind::Secondary).clicked() {
         out.push(Action::Open(id.clone()));
     }
+}
 
-    ui.add_space(6.0);
-    let color = match status {
-        Status::Update => ACCENT_TEXT,
-        Status::Unreachable => WARN,
-        _ => FG_SUBTLE,
-    };
-    let text = widgets::label(ui, entry.status_text(), theme::regular(12.5), color);
+fn card_status(entry: &Entry, ui: &mut Ui) {
+    let (text, tone) = entry.badge();
+    let badge = widgets::badge(ui, text, tone);
     if let Some(err) = entry.check_error() {
-        text.on_hover_text(err);
+        badge.on_hover_text(err);
+    }
+    let version = entry.status_text();
+    if !version.is_empty() {
+        let color = if entry.status() == Status::Update { ACCENT_TEXT } else { FG_SUBTLE };
+        widgets::label(ui, version, theme::regular(12.5), color);
     }
     if let Some(err) = &entry.error {
-        widgets::chip(ui, "Failed", DANGER, DANGER.gamma_multiply(0.14)).on_hover_text(err);
+        widgets::badge(ui, "Failed", Tone::Warn).on_hover_text(err);
     }
 }
 
-fn divider(ui: &mut Ui) {
-    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 1.0), Sense::hover());
-    let y = rect.center().y;
-    ui.painter().line_segment([pos2(rect.left() + 60.0, y), pos2(rect.right() - 8.0, y)], Stroke::new(1.0, LINE));
+fn task_row(entry: &Entry, task: &super::entry::Task, ui: &mut Ui, area: Rect, out: &mut Vec<Action>) {
+    let mut row = ui.new_child(UiBuilder::new().max_rect(area).layout(Layout::right_to_left(Align::Center)));
+    if task.phase == Phase::Downloading && widgets::small_button(&mut row, "Cancel", Kind::Ghost).clicked() {
+        out.push(Action::Cancel(entry.spec.id.clone()));
+    }
+    let width = (row.available_width() - 4.0).max(60.0);
+    row.allocate_ui_with_layout(vec2(width, 30.0), Layout::top_down(Align::Min), |ui| {
+        ui.spacing_mut().item_spacing.y = 5.0;
+        widgets::label(ui, task.text(), theme::regular(12.0), FG_MUTED);
+        widgets::progress(ui, task.fraction(), width);
+    });
+}
+
+fn empty(ui: &mut Ui) {
+    ui.vertical_centered(|ui| {
+        ui.add_space(40.0);
+        let (rect, _) = ui.allocate_exact_size(vec2(90.0, 90.0), Sense::hover());
+        widgets::paint_cookie(ui.painter(), rect.center(), 40.0, 1.0, Some(BG));
+        ui.add_space(12.0);
+        widgets::label(ui, "The jar is empty", theme::display(20.0), FG);
+        widgets::note(ui, "Apps appear here as soon as they're added to the app list.");
+    });
 }
 
 fn ago(seconds: u64) -> String {

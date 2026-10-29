@@ -487,16 +487,16 @@ impl JarApp {
         };
 
         let frame = Frame::new()
-            .fill(BG_PANEL)
+            .fill(BG_CARD)
             .stroke(Stroke::new(1.0, LINE_STRONG))
-            .corner_radius(10)
-            .inner_margin(Margin::same(20));
+            .corner_radius(18)
+            .inner_margin(Margin::same(22));
         let response = egui::Modal::new(egui::Id::unique("confirm"))
-            .backdrop_color(Color32::from_black_alpha(150))
+            .backdrop_color(Color32::from_black_alpha(170))
             .frame(frame)
             .show(ctx, |ui| {
                 ui.set_width(380.0);
-                widgets::label(ui, title, theme::semibold(15.0), FG);
+                widgets::label(ui, title, theme::display(19.0), FG);
                 ui.add_space(4.0);
                 widgets::note(ui, body);
                 ui.add_space(18.0);
@@ -537,18 +537,18 @@ impl eframe::App for JarApp {
 
         let mut actions = Vec::new();
         egui::Panel::left("sidebar")
-            .exact_size(212.0)
+            .exact_size(220.0)
             .resizable(false)
-            .frame(Frame::new().fill(BG_SOFT).inner_margin(Margin::symmetric(12, 16)))
+            .frame(Frame::new().fill(BG_SOFT).inner_margin(Margin::symmetric(14, 18)))
             .show(ui, |ui| sidebar::show(self, ui, &mut actions));
         if self.view == View::Library && self.selected_entry().is_some() {
             egui::Panel::right("detail")
-                .exact_size(370.0)
+                .exact_size(380.0)
                 .resizable(false)
                 .frame(Frame::new().fill(BG_SOFT).inner_margin(Margin::symmetric(22, 20)))
                 .show(ui, |ui| detail::show(self, ui, &mut actions));
         }
-        egui::CentralPanel::default().frame(Frame::new().fill(BG).inner_margin(Margin::symmetric(28, 24))).show(
+        egui::CentralPanel::default().frame(Frame::new().fill(BG).inner_margin(Margin::symmetric(28, 26))).show(
             ui,
             |ui| match self.view {
                 View::Library => library::show(self, ui, &mut actions),

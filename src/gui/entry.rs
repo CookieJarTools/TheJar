@@ -7,6 +7,8 @@ use crate::http::size_text;
 use crate::ops::Phase;
 use crate::platform::Installed;
 
+use super::widgets::Tone;
+
 /// One app in the library and everything known about it right now.
 pub struct Entry {
     pub spec: AppSpec,
@@ -96,20 +98,37 @@ impl Entry {
         }
     }
 
-    /// The short line beside the buttons, such as "0.1.0 → 0.2.0".
+    /// The badge on the app's card: what state it's in, at a glance.
+    pub fn badge(&self) -> (&'static str, Tone) {
+        match self.status() {
+            Status::Checking => ("Checking the oven", Tone::Plain),
+            Status::Update => ("New batch", Tone::New),
+            Status::UpToDate => ("Fresh", Tone::Fresh),
+            Status::NotInstalled => ("Not in the jar yet", Tone::Plain),
+            Status::NoBuild => ("Still in the oven", Tone::Plain),
+            Status::Unreachable => ("Couldn't check", Tone::Warn),
+        }
+    }
+
+    /// The version line beside the badge, such as "0.1.0 → 0.2.0".
     pub fn status_text(&self) -> String {
         let release = self.release();
         match self.status() {
-            Status::Checking => "Checking…".to_owned(),
+            Status::Checking => String::new(),
             Status::Update => {
                 format!("{} → {}", self.installed_text(), release.map(|r| r.version.to_string()).unwrap_or_default())
             }
-            Status::UpToDate => self.installed_text(),
+            Status::UpToDate | Status::Unreachable => {
+                if self.installed.is_some() {
+                    self.installed_text()
+                } else {
+                    String::new()
+                }
+            }
             Status::NotInstalled => {
                 release.map(|r| format!("{} · {}", r.version, size_text(r.asset.size))).unwrap_or_default()
             }
             Status::NoBuild => format!("No {} build yet", Target::current().os_name()),
-            Status::Unreachable => "Couldn't check".to_owned(),
         }
     }
 }
@@ -122,12 +141,12 @@ impl Task {
     pub fn text(&self) -> String {
         match self.phase {
             Phase::Downloading if self.total > 0 => {
-                format!("{} of {}", size_text(self.done), size_text(self.total))
+                format!("Baking · {} of {}", size_text(self.done), size_text(self.total))
             }
-            Phase::Downloading => "Downloading…".to_owned(),
-            Phase::Installing if self.kind == TaskKind::Update => "Updating…".to_owned(),
-            Phase::Installing => "Installing…".to_owned(),
-            Phase::Removing => "Uninstalling…".to_owned(),
+            Phase::Downloading => "Baking…".to_owned(),
+            Phase::Installing if self.kind == TaskKind::Update => "Swapping in the new batch…".to_owned(),
+            Phase::Installing => "Cooling on the rack…".to_owned(),
+            Phase::Removing => "Taking it out of the jar…".to_owned(),
         }
     }
 }
