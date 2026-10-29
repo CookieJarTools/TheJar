@@ -102,10 +102,16 @@ cargo test
 
 ## Releasing The Jar
 
-1. Bump `version` in `Cargo.toml` and commit.
-2. Push a tag for it, such as `v0.2.0`.
+On GitHub, open **Actions › Release › Run workflow**, pick which part of the version goes up, and press **Run workflow**:
 
-The [release workflow](.github/workflows/release.yml) tests on Windows and Linux, builds `TheJar-Setup-0.2.0.exe` and `TheJar-0.2.0.AppImage`, and attaches them to the tag's release. It creates the release as a pre-release if it doesn't exist yet.
+- **patch** for fixes (0.1.0 → 0.1.1), **minor** for new features (0.1.1 → 0.2.0), **major** for big changes (0.2.0 → 1.0.0)
+- **current** releases the version already in `Cargo.toml`, for the first release or after you've set it by hand
+
+The [release workflow](.github/workflows/release.yml) tests on Windows and Linux, commits the new version to `main`, tags it, builds `TheJar-Setup-x.y.z.exe` and `TheJar-x.y.z.AppImage`, and publishes the release with notes generated from the commits since the last one. Leave **Mark it as a pre-release** ticked to match the other CookieJarTools apps. Every copy of The Jar offers the update on its next check.
+
+From a terminal, `gh workflow run release.yml -f bump=patch` does the same. Run `git pull` afterwards, since the workflow commits the version change to `main`.
+
+Pushing a tag such as `v0.2.0` by hand still works too: the workflow builds that tag and attaches the files to its release. `scripts/bump-version.py` is what sets the version, if you want to bump it locally without releasing.
 
 ## Licence
 

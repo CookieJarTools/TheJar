@@ -1,6 +1,8 @@
 ; Builds TheJar-Setup-<version>.exe. The release workflow runs:
 ;
-;   makensis -DVERSION=0.1.0 -DFILEVERSION=0.1.0.0 -DEXE=path/to/thejar.exe -DOUTDIR=dist installer.nsi
+;   makensis -DVERSION=0.1.0 -DFILEVERSION=0.1.0.0 -DEXE=/abs/thejar.exe -DOUTDIR=/abs/dist -DROOT=/abs/repo installer.nsi
+;
+; Use absolute paths: makensis moves into this script's folder before it reads anything.
 ;
 ; It installs for the current user only, so it never asks for admin rights. /S installs
 ; silently, and --run opens The Jar afterwards, which is how The Jar updates itself.
@@ -21,7 +23,9 @@ RequestExecutionLevel user
 !define APP_EXE "TheJar.exe"
 !define PUBLISHER "Joseph Cook"
 !define UNINSTALL_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\TheJar"
-!define ROOT "${__FILEDIR__}/../.."
+!ifndef ROOT
+  !define ROOT "../.."
+!endif
 
 Name "${NAME}"
 OutFile "${OUTDIR}/TheJar-Setup-${VERSION}.exe"

@@ -1,17 +1,41 @@
 name: Release
 
-# Pull requests and pushes to main are tested on Windows and Linux. Pushing a tag like v0.1.0
-# also builds TheJar-Setup-0.1.0.exe and TheJar-0.1.0.AppImage and attaches them to that tag's
-# release. The release is created as a pre-release if it doesn't exist yet, so the notes can be
-# written before or after.
+# To publish a new version, open Actions › Release › Run workflow and pick which part of the
+# version goes up. The workflow tests main, sets the version in Cargo.toml, commits and tags
+# it, builds TheJar-Setup-x.y.z.exe and TheJar-x.y.z.AppImage, and publishes the release.
+# Every copy of The Jar offers the update on its next check.
+#
+# Pull requests and pushes to main are tested and built the same way, without releasing.
+# Pushing a tag like v0.2.0 by hand still works too: that tag is built and its files are
+# attached to its release, which is created as a pre-release if it doesn't exist yet.
 on:
   push:
     branches: [main]
     tags: ['v*']
   pull_request:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: Which part of the version goes up. "current" releases the version already in Cargo.toml.
+        type: choice
+        options: [patch, minor, major, current]
+        default: patch
+      prerelease:
+        description: Mark it as a pre-release
+        type: boolean
+        default: true
 
 permissions:
   contents: read
+
+# Two releases at once would race for the same version number.
+concurrency:
+  group: release-${{ github.event_name == 'workflow_dispatch' && 'publish' || github.ref }}
+  cancel-in-progress: false
+
+env:
+  # Set on a tag push. On Run workflow it comes from the tag job instead.
+  PUSHED_TAG: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
 
 jobs:
   test:
@@ -30,9 +54,52 @@ jobs:
       - run: cargo clippy --all-targets --locked -- -D warnings
       - run: cargo test --locked
 
+  tag:
+    name: Bump the version and tag it
+    if: github.event_name == 'workflow_dispatch'
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      tag: ${{ steps.bump.outputs.tag }}
+      sha: ${{ steps.bump.outputs.sha }}
+    steps:
+      - name: Only from main
+        if: github.ref != 'refs/heads/main'
+        run: |
+          echo "::error::Releases are made from main. This run was started on $GITHUB_REF_NAME."
+          exit 1
+
+      - uses: actions/checkout@v7
+
+      - name: Bump, commit and tag
+        id: bump
+        env:
+          BUMP: ${{ inputs.bump }}
+        run: |
+          version=$(python3 scripts/bump-version.py "$BUMP")
+          tag="v$version"
+          if git ls-remote --exit-code --tags origin "refs/tags/$tag" > /dev/null; then
+            echo "::error::$tag already exists. Pick patch, minor or major to make a new version."
+            exit 1
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898283+github-actions[bot]@users.noreply.github.com"
+          if ! git diff --quiet; then
+            git commit -am "Release $version"
+          fi
+          git tag "$tag"
+          # Both or neither: a tag without its version commit on main would be confusing.
+          git push --atomic origin HEAD:main "$tag"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
   build:
     name: Build on ${{ matrix.os }}
-    needs: test
+    needs: [test, tag]
+    # The tag job only runs on Run workflow; being skipped is fine, failing is not.
+    if: ${{ !cancelled() && !failure() }}
     strategy:
       matrix:
         include:
@@ -42,11 +109,15 @@ jobs:
           - os: ubuntu-22.04
             artifact: linux
     runs-on: ${{ matrix.os }}
+    env:
+      RELEASE_TAG: ${{ needs.tag.outputs.tag }}
     defaults:
       run:
         shell: bash
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.tag.outputs.sha || github.sha }}
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
 
@@ -54,8 +125,9 @@ jobs:
         run: |
           version=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
           echo "VERSION=$version" >> "$GITHUB_ENV"
-          if [ "$GITHUB_REF_TYPE" = tag ] && [ "v$version" != "$GITHUB_REF_NAME" ]; then
-            echo "::error::Cargo.toml says $version, so the files would not be named for $GITHUB_REF_NAME."
+          tag=${RELEASE_TAG:-$PUSHED_TAG}
+          if [ -n "$tag" ] && [ "v$version" != "$tag" ]; then
+            echo "::error::Cargo.toml says $version, so the files would not be named for $tag."
             exit 1
           fi
 
@@ -82,10 +154,13 @@ jobs:
 
   installer:
     name: Build the Windows installer
-    needs: build
+    needs: [tag, build]
+    if: ${{ !cancelled() && !failure() }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.tag.outputs.sha || github.sha }}
       - uses: actions/download-artifact@v8
         with:
           name: windows
@@ -100,6 +175,7 @@ jobs:
             -DFILEVERSION="${version%%-*}.0" \
             -DEXE="$PWD/windows/thejar.exe" \
             -DOUTDIR="$PWD/dist" \
+            -DROOT="$PWD" \
             packaging/windows/installer.nsi
       - uses: actions/upload-artifact@v7
         with:
@@ -109,26 +185,38 @@ jobs:
           retention-days: 7
 
   release:
-    name: Attach to the release
-    if: github.ref_type == 'tag'
-    needs: [build, installer]
+    name: Publish the release
+    needs: [tag, build, installer]
+    if: ${{ !cancelled() && !failure() && (needs.tag.outputs.tag != '' || github.ref_type == 'tag') }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    env:
+      RELEASE_TAG: ${{ needs.tag.outputs.tag }}
+      PRERELEASE: ${{ github.event_name != 'workflow_dispatch' || inputs.prerelease }}
     steps:
       - uses: actions/download-artifact@v8
         with:
           path: files
           merge-multiple: true
-      - name: Attach the files
+      - name: Publish
         working-directory: files
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
+          tag=${RELEASE_TAG:-$PUSHED_TAG}
           # The bare exe ships inside the installer; only the installer is published.
           rm -f thejar.exe
           sha256sum *
-          gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1 ||
-            gh release create "$GITHUB_REF_NAME" --prerelease --title "The Jar ${GITHUB_REF_NAME#v}" --generate-notes
-          gh release upload "$GITHUB_REF_NAME" * --clobber
+          if gh release view "$tag" > /dev/null 2>&1; then
+            gh release upload "$tag" * --clobber
+            exit 0
+          fi
+          # Made as a draft with its files, then published, so The Jar never sees it half-uploaded.
+          flags=(--draft --verify-tag --generate-notes --title "The Jar ${tag#v}")
+          if [ "$PRERELEASE" = true ]; then
+            flags+=(--prerelease)
+          fi
+          gh release create "$tag" * "${flags[@]}"
+          gh release edit "$tag" --draft=false
