@@ -21,7 +21,8 @@ use crate::catalog::{self, Source};
 use crate::github::{self, Release};
 use crate::http::{CANCELLED, Http};
 use crate::icons;
-use crate::platform;
+use crate::paths;
+use crate::platform::{self, Origin};
 use crate::selfupdate::{self, Ready};
 use crate::settings::Settings;
 use entry::{Entry, Icon, Status, Task, TaskKind};
@@ -67,6 +68,8 @@ pub enum SelfUpdate {
 enum Confirm {
     Uninstall(String),
     CloseFirst(String),
+    /// Updating a copy The Jar didn't install and can't tell the version of.
+    Replace(String),
 }
 
 /// What a click asked for. Views only read state and push these; [`JarApp::apply`] acts on them.
@@ -374,14 +377,19 @@ impl JarApp {
             return;
         };
         let running = entry.installed.as_ref().is_some_and(|installed| platform::is_running(&entry.spec, installed));
-        if running && platform::CLOSES_APP_TO_UPDATE {
+        let question = if entry.replaces_unknown() {
+            Some(Confirm::Replace(id.to_owned()))
+        } else if running && platform::CLOSES_APP_TO_UPDATE {
+            Some(Confirm::CloseFirst(id.to_owned()))
+        } else {
+            None
+        };
+        match question {
             // Only one question at a time; anything else waits for the next click.
-            if self.confirm.is_none() {
-                self.confirm = Some(Confirm::CloseFirst(id.to_owned()));
-            }
-            return;
+            Some(question) if self.confirm.is_none() => self.confirm = Some(question),
+            Some(_) => {}
+            None => self.start_install(id),
         }
-        self.start_install(id);
     }
 
     fn start_install(&mut self, id: &str) {
@@ -469,16 +477,31 @@ impl JarApp {
         let (id, yes, kind) = match confirm {
             Confirm::Uninstall(id) => (id, "Uninstall", Kind::Destructive),
             Confirm::CloseFirst(id) => (id, "Close and update", Kind::Primary),
+            Confirm::Replace(id) => (id, "Replace it", Kind::Primary),
         };
-        let name = self.entry(id).map_or(id.as_str(), |e| e.spec.name.as_str());
+        let entry = self.entry(id);
+        let name = entry.map_or(id.as_str(), |e| e.spec.name.as_str());
+        let installed = entry.and_then(|e| e.installed.as_ref());
+        let found = installed.filter(|installed| installed.origin == Origin::Found);
         let (title, body) = match confirm {
             Confirm::Uninstall(_) => (
                 format!("Uninstall {name}?"),
-                if cfg!(windows) {
-                    format!("This runs {name}'s uninstaller. Its settings and data are kept.")
-                } else {
-                    format!("This removes {name} and its menu entry. Its settings and data are kept.")
+                match found {
+                    Some(found) => format!(
+                        "This deletes {} and the menu entry that opens it. Its settings and data are kept.",
+                        paths::pretty(&found.program)
+                    ),
+                    None if cfg!(windows) => format!("This runs {name}'s uninstaller. Its settings and data are kept."),
+                    None => format!("This removes {name} and its menu entry. Its settings and data are kept."),
                 },
+            ),
+            Confirm::Replace(_) => (
+                format!("Replace {name}?"),
+                format!(
+                    "The Jar didn't install the copy in {}, so it can't tell which version that is. This replaces it with {name} {}.",
+                    installed.map(|i| paths::pretty(&i.location)).unwrap_or_default(),
+                    entry.and_then(Entry::release).map(|r| r.version.to_string()).unwrap_or_default()
+                ),
             ),
             Confirm::CloseFirst(_) => (
                 format!("{name} is open"),
@@ -507,7 +530,7 @@ impl JarApp {
                         if widgets::button(ui, yes, kind).clicked() {
                             actions.push(match confirm {
                                 Confirm::Uninstall(id) => Action::UninstallConfirmed(id.clone()),
-                                Confirm::CloseFirst(id) => Action::InstallConfirmed(id.clone()),
+                                Confirm::CloseFirst(id) | Confirm::Replace(id) => Action::InstallConfirmed(id.clone()),
                             });
                         }
                         if widgets::button(ui, "Cancel", Kind::Ghost).clicked() {

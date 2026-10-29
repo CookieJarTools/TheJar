@@ -168,12 +168,13 @@ mod tests {
     fn bundled_list_is_valid() {
         let apps = parse(BUNDLED).unwrap();
         let ids: Vec<&str> = apps.iter().map(|a| a.id.as_str()).collect();
-        assert_eq!(ids, ["crumbtree", "gamebridge", "postie"]);
+        assert_eq!(ids, ["crumbtree", "gamebridge", "postie", "whisk"]);
         assert_eq!(apps[0].exe_name(), "CrumbTree.exe");
         assert_eq!(apps[0].linux.protocols, ["crumbtree"]);
         assert_eq!(apps[1].desktop_name(), "gamebridge");
         assert_eq!(apps[2].desktop_name(), "postie");
         assert_eq!(apps[2].linux.protocols, ["mailto"]);
+        assert_eq!(apps[3].exe_name(), "Whisk.exe");
     }
 
     #[test]

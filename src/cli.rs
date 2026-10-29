@@ -7,7 +7,7 @@ use crate::catalog::{self, AppSpec, Source};
 use crate::github::{self, Target};
 use crate::http::{Http, size_text};
 use crate::ops::{self, Phase};
-use crate::platform;
+use crate::platform::{self, Installed, Origin};
 use crate::selfupdate::{self, Ready};
 use crate::settings::Settings;
 
@@ -85,7 +85,7 @@ fn list() -> Result<(), String> {
         let installed = platform::detect(app);
         let latest =
             github::latest(&session.http, &app.repo, app.asset_pattern(), session.settings.include_prereleases);
-        let installed_text = installed.as_ref().map_or("-".to_owned(), |i| i.version_text.clone());
+        let installed_text = installed.as_ref().map_or("-".to_owned(), installed_text);
         let latest_text = match latest {
             Ok(Some(release)) => {
                 let newer = installed.as_ref().is_some_and(|i| i.version.as_ref().is_none_or(|v| release.version > *v));
@@ -113,13 +113,24 @@ fn list() -> Result<(), String> {
     Ok(())
 }
 
+/// The version, and who looks after it when that isn't The Jar.
+fn installed_text(installed: &Installed) -> String {
+    let version = if installed.version_text.is_empty() { "unknown" } else { &installed.version_text };
+    match installed.origin {
+        Origin::Jar => version.to_owned(),
+        Origin::Found => format!("{version} (not from The Jar)"),
+        Origin::System(Some(manager)) => format!("{version} ({manager})"),
+        Origin::System(None) => format!("{version} (system)"),
+    }
+}
+
 fn install(names: &[String], update_only: bool) -> Result<(), String> {
     let session = session();
     let targets: Vec<&AppSpec> = if names.is_empty() || names == ["--all"] {
         if !update_only {
             return Err("Name an app to install, such as `thejar install crumbtree`.".to_owned());
         }
-        session.apps.iter().filter(|app| platform::detect(app).is_some()).collect()
+        session.apps.iter().filter(|app| updates_with_the_rest(app)).collect()
     } else {
         names.iter().map(|name| find(&session.apps, name)).collect::<Result<_, _>>()?
     };
@@ -141,11 +152,36 @@ fn install(names: &[String], update_only: bool) -> Result<(), String> {
     Ok(())
 }
 
+/// Whether `thejar update` with no names should update it. A copy The Jar didn't install and
+/// can't tell the version of is only replaced when it's named.
+fn updates_with_the_rest(app: &AppSpec) -> bool {
+    match platform::detect(app) {
+        Some(installed) if installed.origin == Origin::Found && installed.version.is_none() => {
+            println!(
+                "{}: The Jar didn't install the copy in {} and can't tell its version, so it's left alone. \
+                 `thejar install {}` replaces it.",
+                app.name,
+                crate::paths::pretty(&installed.location),
+                app.id
+            );
+            false
+        }
+        installed => installed.is_some(),
+    }
+}
+
 fn install_one(session: &Session, app: &AppSpec, update_only: bool) -> Result<(), String> {
     let installed = platform::detect(app);
     if installed.is_none() && update_only {
         println!("{} isn't installed. Use `thejar install {}`.", app.name, app.id);
         return Ok(());
+    }
+    if let Some(reason) = installed.as_ref().and_then(Installed::kept_elsewhere) {
+        if update_only {
+            println!("{}: {reason}", app.name);
+            return Ok(());
+        }
+        return Err(reason);
     }
     let Some(release) =
         github::latest(&session.http, &app.repo, app.asset_pattern(), session.settings.include_prereleases)?

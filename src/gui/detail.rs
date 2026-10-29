@@ -9,6 +9,7 @@ use crate::github::{self, Target};
 use crate::http::size_text;
 use crate::ops::Phase;
 use crate::paths;
+use crate::platform::Origin;
 
 pub fn show(app: &JarApp, ui: &mut Ui, out: &mut Vec<Action>) {
     let Some(entry) = app.selected_entry() else {
@@ -86,6 +87,23 @@ fn actions(entry: &Entry, ui: &mut Ui, out: &mut Vec<Action>) {
             out.push(Action::Open(id.clone()));
         }
     });
+    if let Some(note) = origin_note(entry) {
+        ui.add_space(8.0);
+        widgets::note(ui, note);
+    }
+}
+
+/// Says so when The Jar didn't install this copy.
+fn origin_note(entry: &Entry) -> Option<String> {
+    let installed = entry.installed.as_ref()?;
+    match installed.origin {
+        Origin::Jar => None,
+        Origin::Found => Some(format!(
+            "The Jar didn't install this copy, so updates replace it where it is, in {}.",
+            paths::pretty(&installed.location)
+        )),
+        Origin::System(_) => installed.kept_elsewhere(),
+    }
 }
 
 fn messages(entry: &Entry, ui: &mut Ui, out: &mut Vec<Action>) {
@@ -159,7 +177,8 @@ fn facts(entry: &Entry, ui: &mut Ui, out: &mut Vec<Action>) {
             if widgets::small_button(ui, "Show folder", Kind::Ghost).clicked() {
                 out.push(Action::ShowFolder(installed.location.clone()));
             }
-            if entry.task.is_none() && widgets::small_button(ui, "Uninstall", Kind::Danger).clicked() {
+            let removable = installed.kept_elsewhere().is_none();
+            if removable && entry.task.is_none() && widgets::small_button(ui, "Uninstall", Kind::Danger).clicked() {
                 out.push(Action::Uninstall(entry.spec.id.clone()));
             }
         }

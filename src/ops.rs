@@ -25,6 +25,9 @@ pub fn install(
     report: &mut dyn FnMut(Phase, u64, u64),
     cancel: &AtomicBool,
 ) -> Result<Option<Installed>, String> {
+    if let Some(reason) = existing.and_then(Installed::kept_elsewhere) {
+        return Err(reason);
+    }
     let file = platform::download_path(app, &release.asset)?;
     report(Phase::Downloading, 0, release.asset.size);
     http.download(&release.asset, &file, &mut |done, total| report(Phase::Downloading, done, total), cancel)?;
@@ -43,6 +46,9 @@ pub fn install(
 }
 
 pub fn uninstall(app: &AppSpec, installed: &Installed, report: &mut dyn FnMut(Phase, u64, u64)) -> Result<(), String> {
+    if let Some(reason) = installed.kept_elsewhere() {
+        return Err(reason);
+    }
     report(Phase::Removing, 0, 0);
     platform::uninstall(app, installed)
 }

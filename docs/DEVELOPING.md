@@ -29,7 +29,7 @@ Add it to [`apps.json`](../apps.json) and push. The Jar reads that file from thi
 | `windows.product_name` | The name the installer registers in Settings › Apps. Defaults to `name`. |
 | `windows.exe` | The program inside the install folder. Defaults to `<product_name>.exe`. |
 | `windows.asset`, `linux.asset` | Which release file to use, with `*` as a wildcard. Only needed if the defaults pick the wrong one. |
-| `linux.desktop_name` | The menu entry's file name. It should match the app's Wayland app ID so its window gets the right icon. Defaults to `id`. |
+| `linux.desktop_name` | The menu entry's file name. It should match the app's Wayland app ID so its window gets the right icon. The Jar also looks for an existing menu entry with this name, or the app's `name`, to find copies it didn't install. Defaults to `id`. |
 | `linux.categories` | Menu categories, such as `Development;`. |
 | `linux.protocols` | URL schemes the app opens, without `://`. |
 

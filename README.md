@@ -1,6 +1,6 @@
 # The Jar
 
-The Jar installs the CookieJarTools desktop apps on Windows and Linux and keeps them up to date. Right now that's [CrumbTree](https://github.com/CookieJarTools/CrumbTree), [GameBridge](https://github.com/CookieJarTools/GameBridge) and [Postie](https://github.com/CookieJarTools/Postie) (Linux only), and new apps appear in it on their own as they're released.
+The Jar installs the CookieJarTools desktop apps on Windows and Linux and keeps them up to date. Right now that's [CrumbTree](https://github.com/CookieJarTools/CrumbTree), [GameBridge](https://github.com/CookieJarTools/GameBridge), [Postie](https://github.com/CookieJarTools/Postie) (Linux only) and [Whisk](https://github.com/CookieJarTools/Whisk), and new apps appear in it on their own as they're released.
 
 It's small and opens straight away.
 
@@ -39,7 +39,11 @@ In **Settings** you can:
 
 **On Windows** The Jar runs each app's own installer for you, the same as if you'd run it yourself. Apps appear in the Start menu and in Settings › Apps, and apps you installed before you had The Jar are picked up too. If an app is open when you update it, The Jar asks first, because updating closes it.
 
-**On Linux** apps are AppImages kept in `~/.local/share/the-jar/apps`, with menu entries and icons in `~/.local/share/applications`. Links such as `crumbtree://` open the right app. If an app is running when it updates, it carries on as the old version until you reopen it. The Jar never changes or removes a menu entry it didn't make.
+**On Linux** apps are AppImages kept in `~/.local/share/the-jar/apps`, with menu entries and icons in `~/.local/share/applications`. Links such as `crumbtree://` open the right app. If an app is running when it updates, it carries on as the old version until you reopen it.
+
+Apps you already had on Linux are picked up too, from their menu entry or as an AppImage in `~/Applications` or `~/AppImages`. The Jar updates those where they are, so your menu entry and anything else that opens the app keep working. If it can't tell which version you have, it asks before replacing it. Uninstalling one deletes it and the menu entry that opens it. Apps installed with your package manager show as **Store-bought**: The Jar opens them, but updating and removing them is up to the package manager.
+
+The Jar never changes a menu entry it didn't make, and only removes one when you uninstall the app it opens.
 
 ## Command line
 

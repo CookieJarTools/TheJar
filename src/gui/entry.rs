@@ -5,7 +5,7 @@ use crate::catalog::AppSpec;
 use crate::github::{Release, Target};
 use crate::http::size_text;
 use crate::ops::Phase;
-use crate::platform::Installed;
+use crate::platform::{Installed, Origin};
 
 use super::widgets::Tone;
 
@@ -51,6 +51,8 @@ pub enum Status {
     Update,
     NoBuild,
     Unreachable,
+    /// Installed by the system's package manager, which updates it instead of The Jar.
+    System,
 }
 
 impl Entry {
@@ -70,6 +72,9 @@ impl Entry {
         let Some(latest) = &self.latest else {
             return Status::Checking;
         };
+        if self.installed.as_ref().is_some_and(|installed| matches!(installed.origin, Origin::System(_))) {
+            return Status::System;
+        }
         match (&self.installed, latest) {
             (_, Err(_)) => Status::Unreachable,
             (None, Ok(None)) => Status::NoBuild,
@@ -85,15 +90,24 @@ impl Entry {
         }
     }
 
+    /// A copy The Jar didn't install and can't tell the version of, so updating it is a leap.
+    pub fn replaces_unknown(&self) -> bool {
+        self.installed
+            .as_ref()
+            .is_some_and(|installed| installed.origin == Origin::Found && installed.version.is_none())
+    }
+
     pub fn icon_uri(&self) -> Option<&str> {
         self.icon.as_ref().map(|icon| icon.uri.as_str())
     }
 
     pub fn installed_text(&self) -> String {
         match &self.installed {
-            Some(installed) => {
-                installed.version.as_ref().map_or_else(|| installed.version_text.clone(), ToString::to_string)
-            }
+            Some(installed) => match &installed.version {
+                Some(version) => version.to_string(),
+                None if installed.version_text.is_empty() => "Unknown".to_owned(),
+                None => installed.version_text.clone(),
+            },
             None => "Not installed".to_owned(),
         }
     }
@@ -107,6 +121,7 @@ impl Entry {
             Status::NotInstalled => ("Not in the jar yet", Tone::Plain),
             Status::NoBuild => ("Still in the oven", Tone::Plain),
             Status::Unreachable => ("Couldn't check", Tone::Warn),
+            Status::System => ("Store-bought", Tone::Plain),
         }
     }
 
@@ -116,7 +131,11 @@ impl Entry {
         match self.status() {
             Status::Checking => String::new(),
             Status::Update => {
-                format!("{} → {}", self.installed_text(), release.map(|r| r.version.to_string()).unwrap_or_default())
+                let newest = release.map(|r| r.version.to_string()).unwrap_or_default();
+                match self.installed.as_ref().and_then(|i| i.version.as_ref()) {
+                    Some(version) => format!("{version} → {newest}"),
+                    None => format!("{newest} is out"),
+                }
             }
             Status::UpToDate | Status::Unreachable => {
                 if self.installed.is_some() {
@@ -129,6 +148,15 @@ impl Entry {
                 release.map(|r| format!("{} · {}", r.version, size_text(r.asset.size))).unwrap_or_default()
             }
             Status::NoBuild => format!("No {} build yet", Target::current().os_name()),
+            Status::System => {
+                let installed = self.installed.as_ref().and_then(|i| i.version.as_ref());
+                match release {
+                    Some(release) if installed.is_none_or(|v| release.version > *v) => {
+                        format!("{} · {} is out", self.installed_text(), release.version)
+                    }
+                    _ => self.installed_text(),
+                }
+            }
         }
     }
 }

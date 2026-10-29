@@ -188,7 +188,8 @@ fn card_status(entry: &Entry, ui: &mut Ui) {
     let version = entry.status_text();
     if !version.is_empty() {
         let color = if entry.status() == Status::Update { ACCENT_TEXT } else { FG_SUBTLE };
-        widgets::label(ui, version, theme::regular(12.5), color);
+        let text = egui::RichText::new(&version).font(theme::regular(12.5)).color(color);
+        ui.add(egui::Label::new(text).truncate()).on_hover_text(version);
     }
     if let Some(err) = &entry.error {
         widgets::badge(ui, "Failed", Tone::Warn).on_hover_text(err);

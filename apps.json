@@ -37,6 +37,18 @@
         "categories": "Network;Email;Office;",
         "protocols": ["mailto"]
       }
+    },
+    {
+      "id": "whisk",
+      "name": "Whisk",
+      "tagline": "A small, fast code editor with language servers and Claude built in.",
+      "repo": "CookieJarTools/Whisk",
+      "icon": "https://raw.githubusercontent.com/CookieJarTools/Whisk/HEAD/src-tauri/icons/icon.png",
+      "windows": { "product_name": "Whisk" },
+      "linux": {
+        "desktop_name": "whisk",
+        "categories": "Development;IDE;TextEditor;"
+      }
     }
   ]
 }

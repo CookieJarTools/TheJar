@@ -120,7 +120,7 @@ pub fn pick(
             let version = Version::parse(&r.tag_name)?;
             let asset = best_asset(&r.assets, pattern, target)?;
             Some(Release {
-                notes: r.body.unwrap_or_default(),
+                notes: shorten_links(&r.body.unwrap_or_default()),
                 published: r.published_at,
                 prerelease: r.prerelease || version.is_prerelease(),
                 page_url: r.html_url,
@@ -205,9 +205,52 @@ pub fn date_text(published: &str) -> Option<String> {
     Some(format!("{day} {} {year}", MONTHS.get(month.checked_sub(1)?)?))
 }
 
+/// Bare links, such as GitHub's "Full Changelog" line, become short ones (`v0.1.0...v0.2.0`,
+/// `#12`), which read better and can't push the notes wider than the panel.
+fn shorten_links(notes: &str) -> String {
+    let shorten = |line: &str| {
+        line.split(' ').map(|word| short_link(word).unwrap_or_else(|| word.to_owned())).collect::<Vec<_>>().join(" ")
+    };
+    notes.lines().map(shorten).collect::<Vec<_>>().join("\n")
+}
+
+fn short_link(word: &str) -> Option<String> {
+    if !word.starts_with("https://") && !word.starts_with("http://") {
+        return None;
+    }
+    let url = word.trim_end_matches(['.', ',', ';', ':', ')']);
+    let after = &word[url.len()..];
+    let segments: Vec<&str> = url.split('/').filter(|segment| !segment.is_empty()).collect();
+    let [.., kind, last] = segments[..] else {
+        return None;
+    };
+    if segments.len() < 3 {
+        return None;
+    }
+    let text = match kind {
+        "pull" | "issues" if last.bytes().all(|b| b.is_ascii_digit()) => format!("#{last}"),
+        _ => last.to_owned(),
+    };
+    Some(format!("[{text}]({url}){after}"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn shortens_bare_links() {
+        assert_eq!(
+            shorten_links("**Full Changelog**: https://github.com/CookieJarTools/Postie/commits/v0.1.0"),
+            "**Full Changelog**: [v0.1.0](https://github.com/CookieJarTools/Postie/commits/v0.1.0)"
+        );
+        assert_eq!(
+            shorten_links("* Fix it by @jo in https://github.com/CookieJarTools/Whisk/pull/12.\r\n* Next"),
+            "* Fix it by @jo in [#12](https://github.com/CookieJarTools/Whisk/pull/12).\n* Next"
+        );
+        let untouched = "See [the docs](https://example.com/docs), <https://example.com> or https://example.com.";
+        assert_eq!(shorten_links(untouched), untouched);
+    }
 
     const CRUMBTREE: &str = include_str!("testdata/crumbtree-releases.json");
     const GAMEBRIDGE: &str = include_str!("testdata/gamebridge-releases.json");

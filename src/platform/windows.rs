@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 use winreg::RegKey;
 use winreg::enums::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_READ, KEY_WOW64_64KEY};
 
-use super::{Installed, split_command};
+use super::{Installed, Origin, split_command};
 use crate::catalog::AppSpec;
 use crate::github::Release;
 use crate::http::Asset;
@@ -93,6 +93,7 @@ pub fn detect(app: &AppSpec) -> Option<Installed> {
         location,
         program,
         machine_wide: entry.machine_wide,
+        origin: Origin::Jar,
     })
 }
 

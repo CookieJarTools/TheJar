@@ -25,6 +25,36 @@ pub struct Installed {
     pub program: PathBuf,
     /// Installed for everyone on a Windows PC, so its installer asks for admin rights.
     pub machine_wide: bool,
+    pub origin: Origin,
+}
+
+/// How an app got onto this computer, which decides how The Jar updates and removes it.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Origin {
+    /// The Jar installed it, or on Windows the app's own installer did, which The Jar can rerun.
+    Jar,
+    /// Copied into the home folder some other way. The Jar updates and removes it where it is.
+    Found,
+    /// Installed by the system's package manager, or outside the home folder, so The Jar leaves
+    /// it alone. Holds the package manager's name when one owns it.
+    #[cfg_attr(windows, allow(dead_code))]
+    System(Option<&'static str>),
+}
+
+impl Installed {
+    /// Why The Jar won't update or remove it, when something else looks after it.
+    pub fn kept_elsewhere(&self) -> Option<String> {
+        match self.origin {
+            Origin::System(Some(manager)) => {
+                Some(format!("It was installed with {manager}, so update or remove it there."))
+            }
+            Origin::System(None) => Some(format!(
+                "It's in {}, outside your home folder, so The Jar leaves it alone.",
+                crate::paths::pretty(&self.location)
+            )),
+            Origin::Jar | Origin::Found => None,
+        }
+    }
 }
 
 /// Splits a Windows command line such as `"C:\App\Uninstall App.exe" /currentuser /S`
