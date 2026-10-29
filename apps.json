@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "apps": [
+    {
+      "id": "crumbtree",
+      "name": "CrumbTree",
+      "tagline": "A fast, friendly git client with a vertical commit graph.",
+      "repo": "CookieJarTools/CrumbTree",
+      "icon": "https://raw.githubusercontent.com/CookieJarTools/CrumbTree/HEAD/resources/icon.png",
+      "windows": { "product_name": "CrumbTree" },
+      "linux": {
+        "desktop_name": "crumbtree",
+        "categories": "Development;RevisionControl;",
+        "protocols": ["crumbtree"]
+      }
+    },
+    {
+      "id": "gamebridge",
+      "name": "GameBridge",
+      "tagline": "A launcher for Unity, Unreal and custom game engines.",
+      "repo": "CookieJarTools/GameBridge",
+      "icon": "https://raw.githubusercontent.com/CookieJarTools/GameBridge/HEAD/build/icon.png",
+      "windows": { "product_name": "GameBridge" },
+      "linux": {
+        "desktop_name": "gamebridge",
+        "categories": "Development;Game;"
+      }
+    }
+  ]
+}

@@ -1,0 +1,134 @@
+name: Release
+
+# Pull requests and pushes to main are tested on Windows and Linux. Pushing a tag like v0.1.0
+# also builds TheJar-Setup-0.1.0.exe and TheJar-0.1.0.AppImage and attaches them to that tag's
+# release. The release is created as a pre-release if it doesn't exist yet, so the notes can be
+# written before or after.
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Test on ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-22.04, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --check
+      - run: cargo clippy --all-targets --locked -- -D warnings
+      - run: cargo test --locked
+
+  build:
+    name: Build on ${{ matrix.os }}
+    needs: test
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            artifact: windows
+          # The oldest supported Ubuntu, so the AppImage runs on older glibc too.
+          - os: ubuntu-22.04
+            artifact: linux
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Check the tag matches Cargo.toml
+        run: |
+          version=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+          if [ "$GITHUB_REF_TYPE" = tag ] && [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::Cargo.toml says $version, so the files would not be named for $GITHUB_REF_NAME."
+            exit 1
+          fi
+
+      - run: cargo build --release --locked
+
+      - name: Package the AppImage
+        if: runner.os == 'Linux'
+        run: |
+          curl -fsSL -o appimagetool https://github.com/AppImage/appimagetool/releases/download/1.9.1/appimagetool-x86_64.AppImage
+          chmod +x appimagetool
+          ./appimagetool --appimage-extract > /dev/null
+          APPIMAGETOOL="$PWD/squashfs-root/AppRun" packaging/linux/build-appimage.sh "$VERSION"
+
+      - name: Collect the Windows program
+        if: runner.os == 'Windows'
+        run: mkdir -p dist && cp target/release/thejar.exe dist/
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.artifact }}
+          path: dist/
+          if-no-files-found: error
+          retention-days: 7
+
+  installer:
+    name: Build the Windows installer
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: windows
+          path: windows
+      - run: sudo apt-get update && sudo apt-get install -y nsis
+      - name: Build TheJar-Setup.exe
+        run: |
+          version=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
+          mkdir -p dist
+          makensis -V3 \
+            -DVERSION="$version" \
+            -DFILEVERSION="${version%%-*}.0" \
+            -DEXE="$PWD/windows/thejar.exe" \
+            -DOUTDIR="$PWD/dist" \
+            packaging/windows/installer.nsi
+      - uses: actions/upload-artifact@v7
+        with:
+          name: installer
+          path: dist/
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    name: Attach to the release
+    if: github.ref_type == 'tag'
+    needs: [build, installer]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: files
+          merge-multiple: true
+      - name: Attach the files
+        working-directory: files
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          # The bare exe ships inside the installer; only the installer is published.
+          rm -f thejar.exe
+          sha256sum *
+          gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1 ||
+            gh release create "$GITHUB_REF_NAME" --prerelease --title "The Jar ${GITHUB_REF_NAME#v}" --generate-notes
+          gh release upload "$GITHUB_REF_NAME" * --clobber
